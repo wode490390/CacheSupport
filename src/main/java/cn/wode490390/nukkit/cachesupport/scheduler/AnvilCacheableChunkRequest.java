@@ -9,14 +9,15 @@ import cn.nukkit.nbt.NBTIO;
 import cn.nukkit.nbt.tag.CompoundTag;
 import cn.nukkit.network.protocol.LevelChunkPacket;
 import cn.nukkit.scheduler.AsyncTask;
+import cn.nukkit.scheduler.PluginTask;
 import cn.nukkit.utils.ChunkException;
 import cn.wode490390.nukkit.cachesupport.CacheSupport;
 import cn.wode490390.nukkit.cachesupport.math.XXHash64;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
 import java.util.List;
 
 public class AnvilCacheableChunkRequest extends AsyncTask {
@@ -44,7 +45,7 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
 
         byte[] tiles = new byte[0];
         if (!chunk.getBlockEntities().isEmpty()) {
-            List<CompoundTag> tagList = new ArrayList<>();
+            List<CompoundTag> tagList = new ObjectArrayList<>();
             chunk.getBlockEntities().values().stream()
                     .filter(blockEntity -> blockEntity instanceof BlockEntitySpawnable)
                     .forEach(blockEntity -> tagList.add(((BlockEntitySpawnable) blockEntity).getSpawnCompound()));
@@ -81,28 +82,40 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
         byte[] payload = new byte[1 + tiles.length];
         System.arraycopy(tiles, 0, payload, 1, tiles.length);
 
-        this.player.usedChunks.put(Level.chunkHash(this.chunkX, this.chunkZ), true);
-        try {
-            Field f = Player.class.getDeclaredField("chunkLoadCount");
-            f.setAccessible(true);
-            f.set(this.player, (int) f.get(this.player) + 1);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            throw new RuntimeException(e);
-        }
+        int subChunkCount = count;
+        long[] blobIDs = blobIds.stream().mapToLong(Long::valueOf).toArray();
 
-        LevelChunkPacket pk = new LevelChunkPacket();
-        pk.chunkX = this.chunkX;
-        pk.chunkZ = this.chunkZ;
-        pk.subChunkCount = count;
-        pk.cacheEnabled = true;
-        pk.blobIds = blobIds.stream().mapToLong(Long::valueOf).toArray();
-        pk.data = payload;
-        this.player.dataPacket(pk);
+        this.plugin.getServer().getScheduler().scheduleTask(this.plugin, new PluginTask<CacheSupport>(this.plugin) {
+            private final int chunkX = AnvilCacheableChunkRequest.this.chunkX;
+            private final int chunkZ = AnvilCacheableChunkRequest.this.chunkZ;
+            private final Player player = AnvilCacheableChunkRequest.this.player;
 
-        if (this.player.spawned) {
-            this.player.level.getChunkEntities(this.chunkX, this.chunkZ).values().stream()
-                    .filter(entity -> this.player != entity && !entity.isClosed() && entity.isAlive())
-                    .forEach(entity -> entity.spawnTo(this.player));
-        }
+            @Override
+            public void onRun(int currentTick) {
+                this.player.usedChunks.put(Level.chunkHash(this.chunkX, this.chunkZ), true);
+                try {
+                    Field f = Player.class.getDeclaredField("chunkLoadCount");
+                    f.setAccessible(true);
+                    f.set(this.player, (int) f.get(this.player) + 1);
+                } catch (NoSuchFieldException | IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+
+                LevelChunkPacket pk = new LevelChunkPacket();
+                pk.chunkX = this.chunkX;
+                pk.chunkZ = this.chunkZ;
+                pk.subChunkCount = subChunkCount;
+                pk.cacheEnabled = true;
+                pk.blobIds = blobIDs;
+                pk.data = payload;
+                this.player.batchDataPacket(pk);
+
+                if (this.player.spawned) {
+                    this.player.level.getChunkEntities(this.chunkX, this.chunkZ).values().stream()
+                            .filter(entity -> this.player != entity && !entity.isClosed() && entity.isAlive())
+                            .forEach(entity -> entity.spawnTo(this.player));
+                }
+            }
+        });
     }
 }

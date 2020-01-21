@@ -16,16 +16,15 @@ import cn.wode490390.nukkit.cachesupport.protocol.ClientCacheBlobStatusPacket;
 import cn.wode490390.nukkit.cachesupport.protocol.ClientCacheMissResponsePacket;
 import cn.wode490390.nukkit.cachesupport.scheduler.AnvilCacheableChunkRequest;
 import cn.wode490390.nukkit.cachesupport.util.MetricsLite;
-import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import com.google.common.collect.Maps;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class CacheSupport extends PluginBase implements Listener {
 
-    private final Set<Long> supported = new LongOpenHashSet();
-    private final Map<Long, Map<Long, byte[]>> track = new Long2ObjectOpenHashMap<>();
+    private final LongSet supported = new LongOpenHashSet();
+    private final Map<Long, Map<Long, byte[]>> track = Maps.newConcurrentMap();
 
     @Override
     public void onEnable() {
@@ -66,7 +65,7 @@ public class CacheSupport extends PluginBase implements Listener {
             case ProtocolInfo.CLIENT_CACHE_STATUS_PACKET:
                 if (((ClientCacheStatusPacket) packet).supported) {
                     long id = player.getId();
-                    this.track.put(id, new ConcurrentHashMap<>());
+                    this.track.put(id, Maps.newConcurrentMap());
                     this.supported.add(id);
                 }
                 break;
@@ -83,7 +82,7 @@ public class CacheSupport extends PluginBase implements Listener {
                             usedBlobs.remove(id);
                         }
                     }
-                    player.dataPacket(responsePk);
+                    player.batchDataPacket(responsePk);
 
                     for (long id : pk.hitHashes) {
                         usedBlobs.remove(id);
