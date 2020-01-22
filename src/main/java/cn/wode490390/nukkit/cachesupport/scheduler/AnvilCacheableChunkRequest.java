@@ -1,6 +1,7 @@
 package cn.wode490390.nukkit.cachesupport.scheduler;
 
 import cn.nukkit.Player;
+import cn.nukkit.Server;
 import cn.nukkit.blockentity.BlockEntitySpawnable;
 import cn.nukkit.level.Level;
 import cn.nukkit.level.format.ChunkSection;
@@ -9,7 +10,6 @@ import cn.nukkit.nbt.NBTIO;
 import cn.nukkit.nbt.tag.CompoundTag;
 import cn.nukkit.network.protocol.LevelChunkPacket;
 import cn.nukkit.scheduler.AsyncTask;
-import cn.nukkit.scheduler.PluginTask;
 import cn.nukkit.utils.ChunkException;
 import cn.wode490390.nukkit.cachesupport.CacheSupport;
 import cn.wode490390.nukkit.cachesupport.math.XXHash64;
@@ -27,6 +27,10 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
     private final int chunkX;
     private final int chunkZ;
     private final Player player;
+
+    private int subChunkCount = 0;
+    private long[] blobIds;
+    private byte[] payload;
 
     public AnvilCacheableChunkRequest(CacheSupport plugin, Level level, int chunkX, int chunkZ, Player player) {
         this.plugin = plugin;
@@ -56,17 +60,16 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
             }
         }
 
-        int count = 0;
         ChunkSection[] sections = chunk.getSections();
         for (int i = sections.length - 1; i >= 0; i--) {
             if (!sections[i].isEmpty()) {
-                count = i + 1;
+                this.subChunkCount = i + 1;
                 break;
             }
         }
 
         List<Long> blobIds = new LongArrayList();
-        for (int i = 0; i < count; i++) {
+        for (int i = 0; i < this.subChunkCount; i++) {
             byte[] subChunk = new byte[6145];
             System.arraycopy(sections[i].getBytes(), 0, subChunk, 1, 6144);
             long hash = XXHash64.getHash(subChunk);
@@ -79,43 +82,36 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
         blobIds.add(hash);
         this.plugin.trackTransaction(this.player, hash, biome);
 
-        byte[] payload = new byte[1 + tiles.length];
-        System.arraycopy(tiles, 0, payload, 1, tiles.length);
+        this.payload = new byte[1 + tiles.length];
+        System.arraycopy(tiles, 0, this.payload, 1, tiles.length);
 
-        int subChunkCount = count;
-        long[] blobIDs = blobIds.stream().mapToLong(Long::valueOf).toArray();
+        this.blobIds = blobIds.stream().mapToLong(Long::valueOf).toArray();
+    }
 
-        this.plugin.getServer().getScheduler().scheduleTask(this.plugin, new PluginTask<CacheSupport>(this.plugin) {
-            private final int chunkX = AnvilCacheableChunkRequest.this.chunkX;
-            private final int chunkZ = AnvilCacheableChunkRequest.this.chunkZ;
-            private final Player player = AnvilCacheableChunkRequest.this.player;
+    @Override
+    public void onCompletion(Server server) {
+        this.player.usedChunks.put(Level.chunkHash(this.chunkX, this.chunkZ), true);
+        try {
+            Field f = Player.class.getDeclaredField("chunkLoadCount");
+            f.setAccessible(true);
+            f.set(this.player, (int) f.get(this.player) + 1);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
 
-            @Override
-            public void onRun(int currentTick) {
-                this.player.usedChunks.put(Level.chunkHash(this.chunkX, this.chunkZ), true);
-                try {
-                    Field f = Player.class.getDeclaredField("chunkLoadCount");
-                    f.setAccessible(true);
-                    f.set(this.player, (int) f.get(this.player) + 1);
-                } catch (NoSuchFieldException | IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                }
+        LevelChunkPacket pk = new LevelChunkPacket();
+        pk.chunkX = this.chunkX;
+        pk.chunkZ = this.chunkZ;
+        pk.subChunkCount = this.subChunkCount;
+        pk.cacheEnabled = true;
+        pk.blobIds = this.blobIds;
+        pk.data = this.payload;
+        this.player.batchDataPacket(pk);
 
-                LevelChunkPacket pk = new LevelChunkPacket();
-                pk.chunkX = this.chunkX;
-                pk.chunkZ = this.chunkZ;
-                pk.subChunkCount = subChunkCount;
-                pk.cacheEnabled = true;
-                pk.blobIds = blobIDs;
-                pk.data = payload;
-                this.player.batchDataPacket(pk);
-
-                if (this.player.spawned) {
-                    this.player.level.getChunkEntities(this.chunkX, this.chunkZ).values().stream()
-                            .filter(entity -> this.player != entity && !entity.isClosed() && entity.isAlive())
-                            .forEach(entity -> entity.spawnTo(this.player));
-                }
-            }
-        });
+        if (this.player.spawned) {
+            this.player.level.getChunkEntities(this.chunkX, this.chunkZ).values().stream()
+                    .filter(entity -> this.player != entity && !entity.isClosed() && entity.isAlive())
+                    .forEach(entity -> entity.spawnTo(this.player));
+        }
     }
 }
