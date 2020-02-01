@@ -13,7 +13,10 @@ import cn.nukkit.scheduler.AsyncTask;
 import cn.nukkit.utils.ChunkException;
 import cn.wode490390.nukkit.cachesupport.CacheSupport;
 import cn.wode490390.nukkit.cachesupport.math.XXHash64;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongList;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -21,6 +24,17 @@ import java.nio.ByteOrder;
 import java.util.List;
 
 public class AnvilCacheableChunkRequest extends AsyncTask {
+
+    private static final Field F;
+
+    static {
+        try {
+            F = Player.class.getDeclaredField("chunkLoadCount");
+            F.setAccessible(true);
+        } catch (NoSuchFieldException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     private final CacheSupport plugin;
     private final Level level;
@@ -31,6 +45,8 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
     private int subChunkCount = 0;
     private long[] blobIds;
     private byte[] payload;
+
+    private final Long2ObjectMap<byte[]> track = new Long2ObjectOpenHashMap<>(16 + 1); // 16 subChunk + 1 biome
 
     public AnvilCacheableChunkRequest(CacheSupport plugin, Level level, int chunkX, int chunkZ, Player player) {
         this.plugin = plugin;
@@ -68,34 +84,34 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
             }
         }
 
-        List<Long> blobIds = new LongArrayList();
+        LongList blobIds = new LongArrayList();
         for (int i = 0; i < this.subChunkCount; i++) {
-            byte[] subChunk = new byte[6145];
-            System.arraycopy(sections[i].getBytes(), 0, subChunk, 1, 6144);
+            byte[] subChunk = new byte[6145]; // 1 subChunkVersion (always 0) + 4096 blockIds + 2048 blockMeta
+            System.arraycopy(sections[i].getBytes(), 0, subChunk, 1, 6144); // skip subChunkVersion
             long hash = XXHash64.getHash(subChunk);
             blobIds.add(hash);
-            this.plugin.trackTransaction(this.player, hash, subChunk);
+            this.track.put(hash, subChunk);
         }
 
         byte[] biome = chunk.getBiomeIdArray();
         long hash = XXHash64.getHash(biome);
         blobIds.add(hash);
-        this.plugin.trackTransaction(this.player, hash, biome);
+        this.track.put(hash, biome);
 
-        this.payload = new byte[1 + tiles.length];
-        System.arraycopy(tiles, 0, this.payload, 1, tiles.length);
+        this.payload = new byte[1 + tiles.length]; // borderBlocks + blockEntities
+        System.arraycopy(tiles, 0, this.payload, 1, tiles.length); // borderBlocks array size is always 0, skip it
 
-        this.blobIds = blobIds.stream().mapToLong(Long::valueOf).toArray();
+        this.blobIds = blobIds.toLongArray();
     }
 
     @Override
     public void onCompletion(Server server) {
+        this.plugin.trackTransaction(this.player, this.track);
+
         this.player.usedChunks.put(Level.chunkHash(this.chunkX, this.chunkZ), true);
         try {
-            Field f = Player.class.getDeclaredField("chunkLoadCount");
-            f.setAccessible(true);
-            f.set(this.player, (int) f.get(this.player) + 1);
-        } catch (NoSuchFieldException | IllegalAccessException e) {
+            F.set(this.player, (int) F.get(this.player) + 1);
+        } catch (IllegalAccessException e) {
             throw new RuntimeException(e);
         }
 

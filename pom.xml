@@ -7,7 +7,7 @@
     <groupId>cn.wode490390.nukkit</groupId>
     <artifactId>cachesupport</artifactId>
     <packaging>jar</packaging>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
     <name>CacheSupport</name>
     <description>Client blob cache support plugin for Nukkit</description>
     <url>http://wode490390.cn/</url>

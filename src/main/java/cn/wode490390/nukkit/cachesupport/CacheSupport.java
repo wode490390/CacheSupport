@@ -16,15 +16,15 @@ import cn.wode490390.nukkit.cachesupport.protocol.ClientCacheBlobStatusPacket;
 import cn.wode490390.nukkit.cachesupport.protocol.ClientCacheMissResponsePacket;
 import cn.wode490390.nukkit.cachesupport.scheduler.AnvilCacheableChunkRequest;
 import cn.wode490390.nukkit.cachesupport.util.MetricsLite;
-import com.google.common.collect.Maps;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
-import java.util.Map;
 
 public class CacheSupport extends PluginBase implements Listener {
 
     private final LongSet supported = new LongOpenHashSet();
-    private final Map<Long, Map<Long, byte[]>> track = Maps.newConcurrentMap();
+    private final Long2ObjectMap<Long2ObjectMap<byte[]>> track = new Long2ObjectOpenHashMap<>();
 
     @Override
     public void onEnable() {
@@ -65,12 +65,12 @@ public class CacheSupport extends PluginBase implements Listener {
             case ProtocolInfo.CLIENT_CACHE_STATUS_PACKET:
                 if (((ClientCacheStatusPacket) packet).supported) {
                     long id = player.getId();
-                    this.track.put(id, Maps.newConcurrentMap());
+                    this.track.put(id, new Long2ObjectOpenHashMap<>());
                     this.supported.add(id);
                 }
                 break;
             case ProtocolInfo.CLIENT_CACHE_BLOB_STATUS_PACKET:
-                Map<Long, byte[]> usedBlobs = this.track.get(player.getId());
+                Long2ObjectMap<byte[]> usedBlobs = this.track.get(player.getId());
                 if (usedBlobs != null) {
                     ClientCacheBlobStatusPacket pk = (ClientCacheBlobStatusPacket) packet;
 
@@ -92,10 +92,10 @@ public class CacheSupport extends PluginBase implements Listener {
         }
     }
 
-    public void trackTransaction(Player player, long blobId, byte[] blob) {
-        Map<Long, byte[]> usedBlobs = this.track.get(player.getId());
+    public void trackTransaction(Player player, Long2ObjectMap<byte[]> track) {
+        Long2ObjectMap<byte[]> usedBlobs = this.track.get(player.getId());
         if (usedBlobs != null) {
-            usedBlobs.put(blobId, blob);
+            usedBlobs.putAll(track);
         }
     }
 }
