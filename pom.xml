@@ -7,9 +7,9 @@
     <groupId>cn.wode490390.nukkit</groupId>
     <artifactId>cachesupport</artifactId>
     <packaging>jar</packaging>
-    <version>1.0.2</version>
+    <version>1.0.3</version>
     <name>CacheSupport</name>
-    <description>Client blob cache support plugin for Nukkit</description>
+    <description>This demo allows the Nukkit server to enable support for ClientBlobCache</description>
     <url>http://wode490390.cn/</url>
     <inceptionYear>2019</inceptionYear>
 
@@ -54,7 +54,7 @@
     <repositories>
         <repository>
             <id>nukkitx-repo</id>
-            <url>http://repo.nukkitx.com/main/</url>
+            <url>https://repo.nukkitx.com/main/</url>
         </repository>
     </repositories>
 
@@ -68,7 +68,7 @@
         <dependency>
             <groupId>net.openhft</groupId>
             <artifactId>zero-allocation-hashing</artifactId>
-            <version>0.10.1</version>
+            <version>0.11</version>
             <scope>compile</scope>
         </dependency>
     </dependencies>
@@ -90,7 +90,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.2.1</version>
+                <version>3.2.2</version>
                 <configuration>
                     <artifactSet>
                         <includes>

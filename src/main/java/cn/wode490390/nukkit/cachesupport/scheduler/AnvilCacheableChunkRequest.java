@@ -2,6 +2,7 @@ package cn.wode490390.nukkit.cachesupport.scheduler;
 
 import cn.nukkit.Player;
 import cn.nukkit.Server;
+import cn.nukkit.blockentity.BlockEntity;
 import cn.nukkit.blockentity.BlockEntitySpawnable;
 import cn.nukkit.level.Level;
 import cn.nukkit.level.format.ChunkSection;
@@ -10,18 +11,21 @@ import cn.nukkit.nbt.NBTIO;
 import cn.nukkit.nbt.tag.CompoundTag;
 import cn.nukkit.network.protocol.LevelChunkPacket;
 import cn.nukkit.scheduler.AsyncTask;
+import cn.nukkit.utils.BinaryStream;
 import cn.nukkit.utils.ChunkException;
 import cn.wode490390.nukkit.cachesupport.CacheSupport;
 import cn.wode490390.nukkit.cachesupport.math.XXHash64;
+import com.google.common.collect.Lists;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.ByteOrder;
 import java.util.List;
+import java.util.Map;
 
 public class AnvilCacheableChunkRequest extends AsyncTask {
 
@@ -46,7 +50,7 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
     private long[] blobIds;
     private byte[] payload;
 
-    private final Long2ObjectMap<byte[]> track = new Long2ObjectOpenHashMap<>(16 + 1); // 16 subChunk + 1 biome
+    private final Long2ObjectMap<byte[]> track = new Long2ObjectOpenHashMap<>(16 + 1); // 16 subChunks + 1 biome
 
     public AnvilCacheableChunkRequest(CacheSupport plugin, Level level, int chunkX, int chunkZ, Player player) {
         this.plugin = plugin;
@@ -63,19 +67,6 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
             throw new ChunkException("Invalid Chunk Set");
         }
 
-        byte[] tiles = new byte[0];
-        if (!chunk.getBlockEntities().isEmpty()) {
-            List<CompoundTag> tagList = new ObjectArrayList<>();
-            chunk.getBlockEntities().values().stream()
-                    .filter(blockEntity -> blockEntity instanceof BlockEntitySpawnable)
-                    .forEach(blockEntity -> tagList.add(((BlockEntitySpawnable) blockEntity).getSpawnCompound()));
-            try {
-                tiles = NBTIO.write(tagList, ByteOrder.LITTLE_ENDIAN, true);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
         ChunkSection[] sections = chunk.getSections();
         for (int i = sections.length - 1; i >= 0; i--) {
             if (!sections[i].isEmpty()) {
@@ -85,9 +76,11 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
         }
 
         LongList blobIds = new LongArrayList();
+        BinaryStream temp = new BinaryStream();
         for (int i = 0; i < this.subChunkCount; i++) {
-            byte[] subChunk = new byte[6145]; // 1 subChunkVersion (always 0) + 4096 blockIds + 2048 blockMeta
-            System.arraycopy(sections[i].getBytes(), 0, subChunk, 1, 6144); // skip subChunkVersion
+            sections[i].writeTo(temp.reset());
+            byte[] subChunk = temp.getBuffer();
+
             long hash = XXHash64.getHash(subChunk);
             blobIds.add(hash);
             this.track.put(hash, subChunk);
@@ -98,8 +91,37 @@ public class AnvilCacheableChunkRequest extends AsyncTask {
         blobIds.add(hash);
         this.track.put(hash, biome);
 
-        this.payload = new byte[1 + tiles.length]; // borderBlocks + blockEntities
-        System.arraycopy(tiles, 0, this.payload, 1, tiles.length); // borderBlocks array size is always 0, skip it
+        BinaryStream stream = new BinaryStream(new byte[1 + 1]).reset(); // borderBlocks + extraData (+ blockEntities)
+
+        stream.putByte((byte) 0); // Border blocks size - Education Edition only
+
+        Map<Integer, Integer> extraData = chunk.getBlockExtraDataArray(); // Replaced by second block layer
+        stream.putUnsignedVarInt(extraData.size());
+        if (!extraData.isEmpty()) {
+            for (Map.Entry<Integer, Integer> entry : extraData.entrySet()) {
+                stream.putVarInt(entry.getKey());
+                stream.putLShort(entry.getValue());
+            }
+        }
+
+        Map<Long, BlockEntity> blockEntities = chunk.getBlockEntities();
+        if (!blockEntities.isEmpty()) {
+            List<CompoundTag> tagList = Lists.newArrayList();
+            blockEntities.values().stream()
+                    .filter(blockEntity -> blockEntity instanceof BlockEntitySpawnable)
+                    .forEach(blockEntity -> tagList.add(((BlockEntitySpawnable) blockEntity).getSpawnCompound()));
+            if (!tagList.isEmpty()) {
+                byte[] tiles;
+                try {
+                    tiles = NBTIO.write(tagList, ByteOrder.LITTLE_ENDIAN, true);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+                stream.put(tiles);
+            }
+        }
+
+        this.payload = stream.getBuffer();
 
         this.blobIds = blobIds.toLongArray();
     }

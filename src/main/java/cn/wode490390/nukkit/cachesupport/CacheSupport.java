@@ -29,15 +29,27 @@ public class CacheSupport extends PluginBase implements Listener {
     @Override
     public void onEnable() {
         try {
-            new MetricsLite(this);
+            new MetricsLite(this, 5883);
         } catch (Throwable ignore) {
 
         }
 
-        this.getServer().getNetwork().registerPacket(ProtocolInfo.CLIENT_CACHE_BLOB_STATUS_PACKET, ClientCacheBlobStatusPacket.class);
-        this.getServer().getNetwork().registerPacket(ProtocolInfo.CLIENT_CACHE_MISS_RESPONSE_PACKET, ClientCacheMissResponsePacket.class);
+        boolean support = false;
+        for (int version : ProtocolInfo.SUPPORTED_PROTOCOLS) {
+            if (version >= 361) { //1.12+
+                support = true;
+                break;
+            }
+        };
 
-        this.getServer().getPluginManager().registerEvents(this, this);
+        if (support) {
+            this.getServer().getNetwork().registerPacket(ProtocolInfo.CLIENT_CACHE_BLOB_STATUS_PACKET, ClientCacheBlobStatusPacket.class);
+            this.getServer().getNetwork().registerPacket(ProtocolInfo.CLIENT_CACHE_MISS_RESPONSE_PACKET, ClientCacheMissResponsePacket.class);
+
+            this.getServer().getPluginManager().registerEvents(this, this);
+        } else {
+            this.getLogger().warning("Unsupported protocol version!");
+        }
     }
 
     @EventHandler
